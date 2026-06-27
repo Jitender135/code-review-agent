@@ -5,12 +5,9 @@ import json
 from fastapi import FastAPI, Request, HTTPException
 from dotenv import load_dotenv
 from github import Github, Auth
-import jwt
 import time
 
-from agents.reviewer import review_diff
-from agents.commenter import post_review
-from agents.context_agent import index_repo_history, get_similar_prs
+from agents.pipeline import review_pipeline
 
 load_dotenv()
 
@@ -79,16 +76,14 @@ async def handle_webhook(request: Request):
     diff = get_pr_diff(repo_name, pr_number, installation_id)
     print(f"Diff fetched — {len(diff)} characters")
 
-    collection_name = index_repo_history(repo_name, installation_id)
-    similar_prs = get_similar_prs(collection_name, diff)
-    print(f"Retrieved {len(similar_prs)} similar past PRs for context")
-
-    print("Sending to Groq for review...")
-    review = review_diff(diff, context=similar_prs)
-
-    print("\nReview result:")
-    print(json.dumps(review, indent=2))
-
-    post_review(repo_name, pr_number, review, installation_id)
+    review_pipeline.invoke({
+        "repo_name": repo_name,
+        "pr_number": pr_number,
+        "installation_id": installation_id,
+        "diff": diff,
+        "collection_name": "",
+        "similar_prs": [],
+        "review": {}
+    })
 
     return {"status": "received", "pr": pr_number, "repo": repo_name}
