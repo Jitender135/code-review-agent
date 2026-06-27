@@ -6,6 +6,7 @@ load_dotenv()
 
 APP_ID = os.getenv("APP_ID")
 PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
+BOT_HEADER = "## 🤖 AI Code Review"
 
 
 def get_github_client(installation_id: int):
@@ -47,11 +48,7 @@ def format_issue(issue: dict) -> str:
     return block
 
 
-def post_review(repo_name: str, pr_number: int, review: dict, installation_id: int):
-    gh = get_github_client(installation_id)
-    repo = gh.get_repo(repo_name)
-    pr = repo.get_pull(pr_number)
-
+def build_review_body(review: dict) -> str:
     issues = review.get("issues", [])
     errors = [i for i in issues if i.get("severity") == "error"]
     warnings = [i for i in issues if i.get("severity") == "warning"]
@@ -61,7 +58,7 @@ def post_review(repo_name: str, pr_number: int, review: dict, installation_id: i
     verdict_icon = "✅" if approved else "❌"
     verdict_text = "Approved" if approved else "Changes Requested"
 
-    body = "## 🤖 AI Code Review\n\n"
+    body = f"{BOT_HEADER}\n\n"
     body += f"> {review.get('summary', '')}\n\n"
     body += "---\n\n"
 
@@ -92,5 +89,28 @@ def post_review(repo_name: str, pr_number: int, review: dict, installation_id: i
     if not approved and errors:
         body += f"\n*{len(errors)} error(s) must be resolved before this PR can be merged.*\n"
 
-    pr.create_issue_comment(body)
-    print(f"Review posted to PR #{pr_number}")
+    return body
+
+
+def find_existing_bot_comment(pr):
+    for comment in pr.get_issue_comments():
+        if comment.body.startswith(BOT_HEADER):
+            return comment
+    return None
+
+
+def post_review(repo_name: str, pr_number: int, review: dict, installation_id: int):
+    gh = get_github_client(installation_id)
+    repo = gh.get_repo(repo_name)
+    pr = repo.get_pull(pr_number)
+
+    body = build_review_body(review)
+
+    existing = find_existing_bot_comment(pr)
+
+    if existing:
+        existing.edit(body)
+        print(f"Updated existing review comment on PR #{pr_number}")
+    else:
+        pr.create_issue_comment(body)
+        print(f"Posted new review comment on PR #{pr_number}")
