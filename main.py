@@ -1,16 +1,16 @@
 import hmac
 import hashlib
 import os
+import json
 from fastapi import FastAPI, Request, HTTPException
 from dotenv import load_dotenv
 from github import Github, Auth
 import jwt
 import time
-import json
-
 
 from agents.reviewer import review_diff
 from agents.commenter import post_review
+from agents.context_agent import index_repo_history, get_similar_prs
 
 load_dotenv()
 
@@ -24,15 +24,6 @@ PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
 def get_github_client(installation_id: int):
     with open(PRIVATE_KEY_PATH, "r") as f:
         private_key = f.read()
-
-    payload = {
-        "iat": int(time.time()) - 60,
-        "exp": int(time.time()) + 600,
-        "iss": APP_ID
-    }
-
-    encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256")
-
     auth = Auth.AppInstallationAuth(
         Auth.AppAuth(APP_ID, private_key),
         installation_id
@@ -44,12 +35,10 @@ def get_pr_diff(repo_name: str, pr_number: int, installation_id: int):
     gh = get_github_client(installation_id)
     repo = gh.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
-
     diff = ""
     for f in pr.get_files():
         diff += f"--- {f.filename} ---\n"
         diff += f"{f.patch or 'binary file'}\n\n"
-
     return diff
 
 
@@ -88,10 +77,18 @@ async def handle_webhook(request: Request):
     print(f"\nPR #{pr_number} {action} on {repo_name}")
 
     diff = get_pr_diff(repo_name, pr_number, installation_id)
-    print("\nSending to Groq for review...")
-    review = review_diff(diff)
+    print(f"Diff fetched — {len(diff)} characters")
+
+    collection_name = index_repo_history(repo_name, installation_id)
+    similar_prs = get_similar_prs(collection_name, diff)
+    print(f"Retrieved {len(similar_prs)} similar past PRs for context")
+
+    print("Sending to Groq for review...")
+    review = review_diff(diff, context=similar_prs)
+
     print("\nReview result:")
     print(json.dumps(review, indent=2))
+
     post_review(repo_name, pr_number, review, installation_id)
 
     return {"status": "received", "pr": pr_number, "repo": repo_name}

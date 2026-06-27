@@ -8,7 +8,12 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 REVIEW_PROMPT = """You are a senior software engineer doing a code review.
-Analyze the following PR diff and return ONLY valid JSON, nothing else.
+You have been given examples of good merged PRs from this repository to understand its conventions.
+
+Similar past PRs from this repo for context:
+{context}
+
+Now analyze the following new PR diff and return ONLY valid JSON, nothing else.
 No explanation, no markdown, just the raw JSON object.
 
 Return this exact structure:
@@ -25,17 +30,25 @@ Return this exact structure:
 }}
 
 Rules:
-- If the diff looks good with no issues, return empty issues array and approved true
+- Use the past PRs as context for what good code looks like in this repo
 - severity must be exactly one of: error, warning, suggestion
 - Be specific and helpful in comments
-- If it is a markdown or readme file, check for clarity and formatting
+- If no issues found, return empty issues array and approved true
 
-PR Diff:
+PR Diff to review:
 {diff}
 """
 
-def review_diff(diff: str) -> dict:
-    prompt = REVIEW_PROMPT.format(diff=diff[:8000])
+def review_diff(diff: str, context: list = []) -> dict:
+    if context:
+        context_str = "\n---\n".join(context)
+    else:
+        context_str = "No past PRs available for context."
+
+    prompt = REVIEW_PROMPT.format(
+        context=context_str[:3000],
+        diff=diff[:6000]
+    )
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
