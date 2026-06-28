@@ -28,10 +28,17 @@ def build_inline_comment(issue: dict) -> str:
 
     icon = "🚨" if severity == "error" else "⚠️" if severity == "warning" else "💡"
 
-    body = f"{icon} **[{category}]** {comment}\n\n"
+    # extract first sentence only — keep it short
+    short_comment = comment.split(".")[0].strip()
 
-    if fix:
-        body += f"**Fix:**\n```\n{fix}\n```"
+    # extract short fix hint — first line only
+    short_fix = fix.split("\n")[0].strip() if fix else ""
+
+    body = f"{icon} **{category} — {severity.upper()}**\n"
+    body += f"{short_comment}.\n\n"
+
+    if short_fix:
+        body += f"💡 **Hint:** `{short_fix}`"
 
     return body
 
@@ -53,57 +60,62 @@ def build_summary_comment(review: dict, health_score: int, inline_count: int) ->
 
     approved = review.get("approved", False)
     verdict_icon = "✅" if approved else "❌"
-    verdict_text = "Approved" if approved else "Changes Requested"
+    verdict_text = "Approved — ready to merge" if approved else "Changes Requested"
 
     filled = int(health_score / 10)
     bar = "█" * filled + "░" * (10 - filled)
 
     body = f"{BOT_HEADER}\n\n"
-    body += f"### PR Health Score: `{health_score}/100`\n"
+
+    # health score — one line
+    body += f"**Health Score:** `{bar}` {health_score}/100"
     if health_score >= 80:
-        body += f"`{bar}` Great shape!\n\n"
-    elif health_score >= 60:
-        body += f"`{bar}` Needs some work.\n\n"
+        body += " 🟢\n\n"
+    elif health_score >= 50:
+        body += " 🟡\n\n"
     else:
-        body += f"`{bar}` Significant issues found.\n\n"
+        body += " 🔴\n\n"
 
-    body += f"> {review.get('summary', '')}\n\n"
-    body += "---\n\n"
+    # summary — one line
+    summary = review.get("summary", "")
+    short_summary = summary.split(".")[0].strip()
+    body += f"> {short_summary}.\n\n"
 
+    # quick stats — one line
+    stats = []
     if errors:
-        body += f"### 🎯 Priority: Fix errors first\n\n"
-        body += f"This PR has **{len(errors)} error(s)** that must be resolved before reviewing the {len(warnings)} warning(s) and {len(suggestions)} suggestion(s).\n\n"
+        stats.append(f"🚨 {len(errors)} error{'s' if len(errors) > 1 else ''}")
+    if warnings:
+        stats.append(f"⚠️ {len(warnings)} warning{'s' if len(warnings) > 1 else ''}")
+    if suggestions:
+        stats.append(f"💡 {len(suggestions)} suggestion{'s' if len(suggestions) > 1 else ''}")
 
-    if issues:
-        body += "### 📋 Issues Summary\n\n"
-        body += "| Severity | Count | Action |\n"
-        body += "|----------|-------|--------|\n"
-        if errors:
-            body += f"| 🚨 Error | {len(errors)} | Must fix before merge |\n"
-        if warnings:
-            body += f"| ⚠️ Warning | {len(warnings)} | Should fix |\n"
-        if suggestions:
-            body += f"| 💡 Suggestion | {len(suggestions)} | Optional |\n"
-        body += "\n"
+    if stats:
+        body += " · ".join(stats) + "\n\n"
+
+    # priority nudge — only if errors exist
+    if errors:
+        body += f"**Fix the {len(errors)} error{'s' if len(errors) > 1 else ''} above before anything else.**\n\n"
 
     if inline_count > 0:
-        body += f"📌 *{inline_count} inline comment(s) posted directly on the relevant lines above.*\n\n"
+        body += f"*↑ {inline_count} inline comment{'s' if inline_count > 1 else ''} on the relevant lines.*\n\n"
 
+    # fallback issues — short format
     if fallback_issues:
-        body += "---\n\n### Issues without line reference\n\n"
+        body += "---\n"
         for issue in fallback_issues:
-            category = issue.get("category", "general").upper()
             severity = issue.get("severity", "warning")
             icon = "🚨" if severity == "error" else "⚠️" if severity == "warning" else "💡"
-            body += f"{icon} **[{category}]** `{issue.get('file', 'unknown')}`\n\n"
-            body += f"> {issue.get('comment', '')}\n\n"
-            if issue.get("fix"):
-                body += f"**Fix:** `{issue.get('fix')}`\n\n"
-            body += "---\n"
+            short = issue.get("comment", "").split(".")[0]
+            fix = issue.get("fix", "").split("\n")[0]
+            body += f"{icon} `{issue.get('file', '')}` — {short}.\n"
+            if fix:
+                body += f"   💡 `{fix}`\n"
+        body += "\n"
 
-    body += f"\n### {verdict_icon} Verdict: {verdict_text}\n"
+    body += f"---\n{verdict_icon} **{verdict_text}**"
     if not approved and errors:
-        body += f"\n*Resolve {len(errors)} error(s) to unlock approval.*\n"
+        body += f" — resolve {len(errors)} error{'s' if len(errors) > 1 else ''} to unlock"
 
     return body
 
