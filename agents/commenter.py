@@ -3,6 +3,13 @@ from github import Github, Auth
 from dotenv import load_dotenv
 from agents.diff_parser import parse_diff_positions, find_position
 
+from agents.change_tracker import (
+    extract_issues_from_comment,
+    extract_score_from_comment,
+    categorize_changes,
+    build_change_summary
+)
+
 load_dotenv()
 
 APP_ID = os.getenv("APP_ID")
@@ -51,7 +58,7 @@ def calculate_health_score(issues: list) -> int:
     return max(0, min(100, score))
 
 
-def build_summary_comment(review: dict, health_score: int, inline_count: int) -> str:
+def build_summary_comment(review: dict, health_score: int, inline_count: int, change_section: str = "") -> str:
     issues = review.get("issues", [])
     errors = [i for i in issues if i.get("severity") == "error"]
     warnings = [i for i in issues if i.get("severity") == "warning"]
@@ -112,6 +119,9 @@ def build_summary_comment(review: dict, health_score: int, inline_count: int) ->
             if fix:
                 body += f"   💡 `{fix}`\n"
         body += "\n"
+
+    if change_section:
+        body += change_section
 
     body += f"---\n{verdict_icon} **{verdict_text}**"
     if not approved and errors:
@@ -199,8 +209,23 @@ def post_review(repo_name: str, pr_number: int, review: dict, installation_id: i
             inline_count = 0
 
     health_score = calculate_health_score(issues)
-    summary = build_summary_comment(review, health_score, inline_count)
+
+    # change tracking
+    change_section = ""
     existing = find_existing_bot_comment(pr)
+
+    if existing:
+        old_score = extract_score_from_comment(existing.body)
+        old_issues = extract_issues_from_comment(existing.body)
+        new_issue_texts = [
+            f"{i.get('category','').upper()} {i.get('comment','')}"
+            for i in issues
+        ]
+        changes = categorize_changes(old_issues, new_issue_texts)
+        change_section = build_change_summary(changes, old_score, health_score)
+        print(f"Change tracking: {len(changes['fixed'])} fixed, {len(changes['still_present'])} still present, {len(changes['new'])} new")
+
+    summary = build_summary_comment(review, health_score, inline_count, change_section)
 
     if existing:
         existing.edit(summary)
