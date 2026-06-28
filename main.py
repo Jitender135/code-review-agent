@@ -85,8 +85,12 @@ async def handle_webhook(request: Request):
         "pr_number": pr_number,
         "installation_id": installation_id,
         "diff": diff,
+        "config": {},
         "collection_name": "",
         "similar_prs": [],
+        "language": "",
+        "bug_issues": [],
+        "security_issues": [],
         "review": {}
     })
 

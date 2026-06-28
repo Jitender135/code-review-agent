@@ -16,12 +16,11 @@ PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
 INSTALLATION_ID = 142895464  # your installation ID from earlier
 
 # test diff — change this to test different scenarios
-TEST_DIFF = """--- calculator.py ---
-@@ -10,3 +10,5 @@ def get_user(users, index):
- def login(username, password):
-     query = "SELECT * FROM users WHERE username = '" + username + "'"
-     return query
-+# new comment here
+TEST_DIFF = """--- README.md ---
+@@ -1,3 +1,4 @@
+ # test-review-agent
++This is a documentation update
+ hello testing !
 """
 
 TEST_REPO = "Jitender135/test-review-agent"
@@ -50,6 +49,7 @@ def run_test():
         "pr_number": TEST_PR,
         "installation_id": INSTALLATION_ID,
         "diff": TEST_DIFF,
+        "config": {},
         "collection_name": "",
         "similar_prs": [],
         "language": "",

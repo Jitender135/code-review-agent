@@ -53,7 +53,8 @@ def merge_results(
     bug_issues: list,
     security_issues: list,
     similar_prs: list,
-    language: str
+    language: str,
+    max_comments: int = 3
 ) -> dict:
     context_str = "\n---\n".join(similar_prs) if similar_prs else "No past PRs available"
 
@@ -80,7 +81,6 @@ def merge_results(
     try:
         result = json.loads(raw.strip())
 
-        # deduplicate by line_hint — keep only first occurrence
         seen_lines = set()
         deduped = []
         for issue in result.get("issues", []):
@@ -89,7 +89,7 @@ def merge_results(
                 seen_lines.add(hint)
                 deduped.append(issue)
 
-        result["issues"] = deduped[:3]  # max 3 issues
+        result["issues"] = deduped[:max_comments]
         return result
 
     except json.JSONDecodeError:
