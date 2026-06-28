@@ -74,7 +74,8 @@ def commenter_node(state: ReviewState) -> ReviewState:
         state["repo_name"],
         state["pr_number"],
         state["review"],
-        state["installation_id"]
+        state["installation_id"],
+        state["diff"]        # pass diff here
     )
     print("[Agent 5] Comment posted to GitHub")
     return state

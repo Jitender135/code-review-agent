@@ -32,10 +32,14 @@ def get_pr_diff(repo_name: str, pr_number: int, installation_id: int):
     gh = get_github_client(installation_id)
     repo = gh.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
+
     diff = ""
     for f in pr.get_files():
-        diff += f"--- {f.filename} ---\n"
-        diff += f"{f.patch or 'binary file'}\n\n"
+        if f.patch:
+            # use standard unified diff format
+            diff += f"--- {f.filename} ---\n"
+            diff += f"{f.patch}\n\n"
+
     return diff
 
 

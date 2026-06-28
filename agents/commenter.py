@@ -1,6 +1,7 @@
 import os
 from github import Github, Auth
 from dotenv import load_dotenv
+from agents.diff_parser import parse_diff_positions, find_position
 
 load_dotenv()
 
@@ -19,75 +20,90 @@ def get_github_client(installation_id: int):
     return Github(auth=auth)
 
 
-def format_issue(issue: dict) -> str:
+def build_inline_comment(issue: dict) -> str:
     category = issue.get("category", "general").upper()
     severity = issue.get("severity", "warning")
-    file = issue.get("file", "unknown")
     comment = issue.get("comment", "")
-    line_hint = issue.get("line_hint", "")
     fix = issue.get("fix", "")
 
-    if severity == "error":
-        icon = "🚨"
-    elif severity == "warning":
-        icon = "⚠️"
-    else:
-        icon = "💡"
+    icon = "🚨" if severity == "error" else "⚠️" if severity == "warning" else "💡"
 
-    block = f"{icon} **[{category}]** `{file}`\n\n"
-
-    if line_hint:
-        block += f"**Found:**\n```\n{line_hint}\n```\n\n"
-
-    block += f"**Issue:** {comment}\n\n"
+    body = f"{icon} **[{category}]** {comment}\n\n"
 
     if fix:
-        block += f"**Fix:**\n```\n{fix}\n```\n\n"
+        body += f"**Fix:**\n```\n{fix}\n```"
 
-    block += "---\n"
-    return block
+    return body
 
 
-def build_review_body(review: dict) -> str:
+def calculate_health_score(issues: list) -> int:
+    errors = len([i for i in issues if i.get("severity") == "error"])
+    warnings = len([i for i in issues if i.get("severity") == "warning"])
+    suggestions = len([i for i in issues if i.get("severity") == "suggestion"])
+    score = 100 - (errors * 20) - (warnings * 8) - (suggestions * 3)
+    return max(0, min(100, score))
+
+
+def build_summary_comment(review: dict, health_score: int, inline_count: int) -> str:
     issues = review.get("issues", [])
     errors = [i for i in issues if i.get("severity") == "error"]
     warnings = [i for i in issues if i.get("severity") == "warning"]
     suggestions = [i for i in issues if i.get("severity") == "suggestion"]
+    fallback_issues = [i for i in issues if not i.get("_inlined", False)]
 
     approved = review.get("approved", False)
     verdict_icon = "✅" if approved else "❌"
     verdict_text = "Approved" if approved else "Changes Requested"
 
+    filled = int(health_score / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+
     body = f"{BOT_HEADER}\n\n"
+    body += f"### PR Health Score: `{health_score}/100`\n"
+    if health_score >= 80:
+        body += f"`{bar}` Great shape!\n\n"
+    elif health_score >= 60:
+        body += f"`{bar}` Needs some work.\n\n"
+    else:
+        body += f"`{bar}` Significant issues found.\n\n"
+
     body += f"> {review.get('summary', '')}\n\n"
     body += "---\n\n"
 
-    if not issues:
-        body += "### ✅ Everything looks good\n\n"
-        body += "No bugs, security issues, or style problems found. Nice work!\n\n"
-    else:
+    if errors:
+        body += f"### 🎯 Priority: Fix errors first\n\n"
+        body += f"This PR has **{len(errors)} error(s)** that must be resolved before reviewing the {len(warnings)} warning(s) and {len(suggestions)} suggestion(s).\n\n"
+
+    if issues:
+        body += "### 📋 Issues Summary\n\n"
+        body += "| Severity | Count | Action |\n"
+        body += "|----------|-------|--------|\n"
         if errors:
-            body += f"### 🚨 Errors ({len(errors)})\n\n"
-            body += "*These must be fixed before merging.*\n\n"
-            for issue in errors:
-                body += format_issue(issue)
-
+            body += f"| 🚨 Error | {len(errors)} | Must fix before merge |\n"
         if warnings:
-            body += f"\n### ⚠️ Warnings ({len(warnings)})\n\n"
-            body += "*These should be addressed.*\n\n"
-            for issue in warnings:
-                body += format_issue(issue)
-
+            body += f"| ⚠️ Warning | {len(warnings)} | Should fix |\n"
         if suggestions:
-            body += f"\n### 💡 Suggestions ({len(suggestions)})\n\n"
-            body += "*Optional improvements.*\n\n"
-            for issue in suggestions:
-                body += format_issue(issue)
+            body += f"| 💡 Suggestion | {len(suggestions)} | Optional |\n"
+        body += "\n"
 
-    body += f"\n---\n### {verdict_icon} Verdict: {verdict_text}\n"
+    if inline_count > 0:
+        body += f"📌 *{inline_count} inline comment(s) posted directly on the relevant lines above.*\n\n"
 
+    if fallback_issues:
+        body += "---\n\n### Issues without line reference\n\n"
+        for issue in fallback_issues:
+            category = issue.get("category", "general").upper()
+            severity = issue.get("severity", "warning")
+            icon = "🚨" if severity == "error" else "⚠️" if severity == "warning" else "💡"
+            body += f"{icon} **[{category}]** `{issue.get('file', 'unknown')}`\n\n"
+            body += f"> {issue.get('comment', '')}\n\n"
+            if issue.get("fix"):
+                body += f"**Fix:** `{issue.get('fix')}`\n\n"
+            body += "---\n"
+
+    body += f"\n### {verdict_icon} Verdict: {verdict_text}\n"
     if not approved and errors:
-        body += f"\n*{len(errors)} error(s) must be resolved before this PR can be merged.*\n"
+        body += f"\n*Resolve {len(errors)} error(s) to unlock approval.*\n"
 
     return body
 
@@ -98,19 +114,85 @@ def find_existing_bot_comment(pr):
             return comment
     return None
 
+def delete_old_inline_comments(pr, gh_client, repo):
+    try:
+        reviews = pr.get_reviews()
+        for review in reviews:
+            if review.user.login.endswith("[bot]") or "bot" in review.user.login.lower():
+                # delete all comments from this review
+                pass
+        
+        # delete inline review comments from our bot
+        for comment in pr.get_review_comments():
+            try:
+                # check if it's from our bot by looking for our icon
+                if "🚨" in comment.body or "⚠️" in comment.body or "💡" in comment.body:
+                    comment.delete()
+            except Exception as e:
+                print(f"Could not delete comment: {e}")
+    except Exception as e:
+        print(f"Error cleaning old comments: {e}")
 
-def post_review(repo_name: str, pr_number: int, review: dict, installation_id: int):
+
+def post_review(repo_name: str, pr_number: int, review: dict, installation_id: int, diff: str = ""):
     gh = get_github_client(installation_id)
     repo = gh.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
+    commit = list(pr.get_commits())[-1]
 
-    body = build_review_body(review)
+    # clean old inline comments first
+    print("Cleaning old inline comments...")
+    delete_old_inline_comments(pr, gh, repo)
 
+    diff_map = parse_diff_positions(diff) if diff else {}
+    issues = review.get("issues", [])
+
+    print(f"Diff map keys: {list(diff_map.keys())}")
+    print(f"Issues: {[(i.get('file'), i.get('line_hint','')[:30]) for i in issues]}")
+
+    inline_comments = []
+    inline_count = 0
+
+    for issue in issues:
+        filename = issue.get("file", "")
+        line_hint = issue.get("line_hint", "")
+        position = find_position(diff_map, filename, line_hint)
+
+        print(f"  {filename} | '{line_hint[:30]}' → position {position}")
+
+        if position:
+            inline_comments.append({
+                "path": filename,
+                "position": position,
+                "body": build_inline_comment(issue)
+            })
+            issue["_inlined"] = True
+            inline_count += 1
+        else:
+            issue["_inlined"] = False
+
+    if inline_comments:
+        try:
+            pr.create_review(
+                commit=commit,
+                body="",
+                event="COMMENT",
+                comments=inline_comments
+            )
+            print(f"Posted {inline_count} inline comments")
+        except Exception as e:
+            print(f"Inline comment error: {e}")
+            for issue in issues:
+                issue["_inlined"] = False
+            inline_count = 0
+
+    health_score = calculate_health_score(issues)
+    summary = build_summary_comment(review, health_score, inline_count)
     existing = find_existing_bot_comment(pr)
 
     if existing:
-        existing.edit(body)
-        print(f"Updated existing review comment on PR #{pr_number}")
+        existing.edit(summary)
+        print(f"Updated summary comment on PR #{pr_number}")
     else:
-        pr.create_issue_comment(body)
-        print(f"Posted new review comment on PR #{pr_number}")
+        pr.create_issue_comment(summary)
+        print(f"Posted summary comment on PR #{pr_number}")

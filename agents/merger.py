@@ -7,8 +7,8 @@ load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-MERGER_PROMPT = """You are a senior engineering lead doing a final code review summary.
-You have received results from two specialized agents — a bug detector and a security scanner.
+MERGER_PROMPT = """You are a senior engineering lead doing a final code review.
+You have results from a bug detector and security scanner.
 
 Language: {language}
 
@@ -18,39 +18,35 @@ Bug issues found:
 Security issues found:
 {security_issues}
 
-Similar past PRs from this repo for context:
+Similar past PRs for context:
 {context}
 
-Your job:
-- Combine all issues into one coherent review
-- Remove any duplicates
-- Rank by severity (errors first, then warnings, then suggestions)
-- For each issue, include the exact problematic code in line_hint
-- For each issue, include a concrete fix with corrected code in the fix field
-- Write a clear 2-3 sentence summary like a senior engineer would write
+Rules:
+- MAXIMUM 3 issues total in your output — pick only the most critical ones
+- NEVER create two issues for the same line or function
+- Combine related issues into one comment
+- Each issue must be for a DIFFERENT line of code
+- line_hint must be copied EXACTLY from the diff
+- fix must be actual corrected code, short and clear
+- summary must be 2 sentences max, written like a senior engineer
+- approved is false if any errors exist
 
-Return ONLY valid JSON, no explanation, no markdown:
+Return ONLY valid JSON:
 {{
-  "summary": "2-3 sentence overall assessment written like a senior engineer",
+  "summary": "2 sentence assessment",
   "issues": [
     {{
       "file": "filename",
       "severity": "error or warning or suggestion",
       "category": "bug or security or style",
-      "line_hint": "the exact problematic line of code",
-      "comment": "clear explanation of what is wrong",
-      "fix": "the corrected code or approach"
+      "line_hint": "exact code from diff",
+      "comment": "one clear sentence explaining the problem",
+      "fix": "corrected code snippet"
     }}
   ],
   "approved": true or false
-}}
-
-Rules:
-- approved must be false if there are any error severity issues
-- line_hint must be the actual code from the diff, not a description
-- fix must be actual corrected code, not just advice
-- Write like a senior engineer, not a bot
-"""
+    }}
+    """
 
 
 def merge_results(
@@ -70,10 +66,8 @@ def merge_results(
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1
     )
 
     raw = response.choices[0].message.content.strip()
@@ -84,11 +78,24 @@ def merge_results(
             raw = raw[4:]
 
     try:
-        return json.loads(raw.strip())
+        result = json.loads(raw.strip())
+
+        # deduplicate by line_hint — keep only first occurrence
+        seen_lines = set()
+        deduped = []
+        for issue in result.get("issues", []):
+            hint = issue.get("line_hint", "").strip()
+            if hint not in seen_lines:
+                seen_lines.add(hint)
+                deduped.append(issue)
+
+        result["issues"] = deduped[:3]  # max 3 issues
+        return result
+
     except json.JSONDecodeError:
         print(f"Merger JSON parse error: {raw[:200]}")
         return {
             "summary": "Review completed with parsing issues.",
-            "issues": bug_issues + security_issues,
+            "issues": [],
             "approved": False
         }
