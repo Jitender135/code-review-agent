@@ -5,9 +5,7 @@ PyGithub
 PyJWT
 cryptography
 groq
-google-genai
 chromadb
-sentence-transformers
 langgraph
 langchain-core
 pyyaml

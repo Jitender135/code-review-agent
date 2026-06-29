@@ -1,13 +1,13 @@
 import os
-from sentence_transformers import SentenceTransformer
 import chromadb
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from dotenv import load_dotenv
 from agents.github_client import get_github_client
 
 load_dotenv()
 
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
+embedding_fn = DefaultEmbeddingFunction()
 
 
 def index_repo_history(repo_name: str, installation_id: int):
@@ -16,7 +16,10 @@ def index_repo_history(repo_name: str, installation_id: int):
     repo = gh.get_repo(repo_name)
 
     collection_name = repo_name.replace("/", "__").replace("-", "_")
-    collection = chroma_client.get_or_create_collection(name=collection_name)
+    collection = chroma_client.get_or_create_collection(
+        name=collection_name,
+        embedding_function=embedding_fn
+    )
 
     merged_prs = []
     for pr in repo.get_pulls(state="closed", sort="updated", direction="desc"):
@@ -46,7 +49,10 @@ def index_repo_history(repo_name: str, installation_id: int):
 
 def get_similar_prs(collection_name: str, current_diff: str, n: int = 3):
     try:
-        collection = chroma_client.get_collection(name=collection_name)
+        collection = chroma_client.get_collection(
+            name=collection_name,
+            embedding_function=embedding_fn
+        )
         count = collection.count()
         if count == 0:
             return []
