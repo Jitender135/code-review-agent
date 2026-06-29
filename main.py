@@ -4,7 +4,6 @@ import os
 import time
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
-from github import Github
 
 from agents.github_client import get_github_client
 from agents.pipeline import review_pipeline
@@ -14,13 +13,6 @@ load_dotenv()
 app = FastAPI()
 
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-APP_ID = os.getenv("APP_ID")
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
-
-
-def get_github_client(installation_id: int):
-    with open(PRIVATE_KEY_PATH, "r") as f:
-        private_key = f.read()
 
 
 def get_pr_diff(repo_name: str, pr_number: int, installation_id: int):
@@ -45,10 +37,6 @@ def verify_signature(payload: bytes, signature: str) -> bool:
 
 
 def run_review(repo_name: str, pr_number: int, installation_id: int):
-    """
-    Runs in the background after webhook returns 200.
-    All errors are caught here so they never crash the server.
-    """
     start = time.time()
     print(f"\n[Background] Starting review for PR #{pr_number} on {repo_name}")
 
@@ -76,8 +64,6 @@ def run_review(repo_name: str, pr_number: int, installation_id: int):
     except Exception as e:
         elapsed = round(time.time() - start, 1)
         print(f"[Background] Review failed after {elapsed}s for PR #{pr_number}: {e}")
-
-        # post a fallback comment so the developer knows something went wrong
         try:
             gh = get_github_client(installation_id)
             repo = gh.get_repo(repo_name)
@@ -118,7 +104,6 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     print(f"\nWebhook received — PR #{pr_number} {action} on {repo_name}")
     print(f"Queuing background review...")
 
-    # return immediately — review runs in background
     background_tasks.add_task(run_review, repo_name, pr_number, installation_id)
 
     return {"status": "queued", "pr": pr_number, "repo": repo_name}
