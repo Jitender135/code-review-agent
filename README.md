@@ -1,4 +1,4 @@
-# 🤖 AI Code Review Agent
+# AI Code Review Agent
 
 An autonomous multi-agent system that reviews GitHub Pull Requests like a senior engineer — posting inline comments on specific lines, detecting real bugs and security vulnerabilities, and tracking progress between commits.
 
