@@ -64,6 +64,7 @@ def run_review(repo_name: str, pr_number: int, installation_id: int):
     except Exception as e:
         elapsed = round(time.time() - start, 1)
         print(f"[Background] Review failed after {elapsed}s for PR #{pr_number}: {e}")
+
         try:
             gh = get_github_client(installation_id)
             repo = gh.get_repo(repo_name)
