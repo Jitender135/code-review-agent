@@ -1,13 +1,28 @@
 import os
+import re
 import chromadb
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from dotenv import load_dotenv
 from agents.github_client import get_github_client
 
 load_dotenv()
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
-embedding_fn = DefaultEmbeddingFunction()
+
+
+def simple_embed(text: str) -> list:
+    """
+    Keyword frequency vector — no model needed.
+    Works well enough for finding similar PRs.
+    """
+    keywords = [
+        "def", "class", "import", "return", "if", "for", "while",
+        "try", "except", "raise", "async", "await", "sql", "select",
+        "insert", "update", "delete", "password", "token", "secret",
+        "api", "key", "auth", "login", "user", "error", "exception",
+        "null", "none", "index", "list", "dict", "str", "int", "bool"
+    ]
+    text_lower = text.lower()
+    return [float(text_lower.count(kw)) for kw in keywords]
 
 
 def index_repo_history(repo_name: str, installation_id: int):
@@ -18,7 +33,7 @@ def index_repo_history(repo_name: str, installation_id: int):
     collection_name = repo_name.replace("/", "__").replace("-", "_")
     collection = chroma_client.get_or_create_collection(
         name=collection_name,
-        embedding_function=embedding_fn
+        metadata={"hnsw:space": "cosine"}
     )
 
     merged_prs = []
@@ -30,7 +45,7 @@ def index_repo_history(repo_name: str, installation_id: int):
         print("No merged PRs found — skipping indexing")
         return collection_name
 
-    docs, ids, metadatas = [], [], []
+    docs, ids, metadatas, embeddings = [], [], [], []
     for pr in merged_prs:
         files = list(pr.get_files())
         diff_text = " ".join([
@@ -41,8 +56,14 @@ def index_repo_history(repo_name: str, installation_id: int):
         docs.append(doc)
         ids.append(str(pr.number))
         metadatas.append({"title": pr.title, "url": pr.html_url})
+        embeddings.append(simple_embed(doc))
 
-    collection.upsert(documents=docs, ids=ids, metadatas=metadatas)
+    collection.upsert(
+        documents=docs,
+        ids=ids,
+        metadatas=metadatas,
+        embeddings=embeddings
+    )
     print(f"Indexed {len(docs)} merged PRs")
     return collection_name
 
@@ -51,13 +72,14 @@ def get_similar_prs(collection_name: str, current_diff: str, n: int = 3):
     try:
         collection = chroma_client.get_collection(
             name=collection_name,
-            embedding_function=embedding_fn
+            metadata={"hnsw:space": "cosine"}
         )
         count = collection.count()
         if count == 0:
             return []
+        query_embedding = simple_embed(current_diff[:500])
         results = collection.query(
-            query_texts=[current_diff[:500]],
+            query_embeddings=[query_embedding],
             n_results=min(n, count)
         )
         return results["documents"][0]
