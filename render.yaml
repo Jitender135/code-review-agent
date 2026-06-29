@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: code-review-agent
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ID
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PRIVATE_KEY
+        sync: false
