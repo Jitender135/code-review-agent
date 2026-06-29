@@ -1,12 +1,12 @@
 import hmac
 import hashlib
 import os
-import json
 import time
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from dotenv import load_dotenv
-from github import Github, Auth
+from github import Github
 
+from agents.github_client import get_github_client
 from agents.pipeline import review_pipeline
 
 load_dotenv()
@@ -21,11 +21,6 @@ PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
 def get_github_client(installation_id: int):
     with open(PRIVATE_KEY_PATH, "r") as f:
         private_key = f.read()
-    auth = Auth.AppInstallationAuth(
-        Auth.AppAuth(APP_ID, private_key),
-        installation_id
-    )
-    return Github(auth=auth)
 
 
 def get_pr_diff(repo_name: str, pr_number: int, installation_id: int):

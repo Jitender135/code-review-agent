@@ -1,8 +1,8 @@
 import os
-from github import Github, Auth
 from dotenv import load_dotenv
+from github import Github
+from agents.github_client import get_github_client
 from agents.diff_parser import parse_diff_positions, find_position
-
 from agents.change_tracker import (
     extract_issues_from_comment,
     extract_score_from_comment,
@@ -12,19 +12,8 @@ from agents.change_tracker import (
 
 load_dotenv()
 
-APP_ID = os.getenv("APP_ID")
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
 BOT_HEADER = "## 🤖 AI Code Review"
 
-
-def get_github_client(installation_id: int):
-    with open(PRIVATE_KEY_PATH, "r") as f:
-        private_key = f.read()
-    auth = Auth.AppInstallationAuth(
-        Auth.AppAuth(APP_ID, private_key),
-        installation_id
-    )
-    return Github(auth=auth)
 
 
 def build_inline_comment(issue: dict) -> str:

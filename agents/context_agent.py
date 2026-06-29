@@ -1,28 +1,13 @@
 import os
-from github import Github, Auth
 from sentence_transformers import SentenceTransformer
 import chromadb
-import time
-import jwt
 from dotenv import load_dotenv
+from agents.github_client import get_github_client
 
 load_dotenv()
 
-APP_ID = os.getenv("APP_ID")
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
-
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
-
-
-def get_github_client(installation_id: int):
-    with open(PRIVATE_KEY_PATH, "r") as f:
-        private_key = f.read()
-    auth = Auth.AppInstallationAuth(
-        Auth.AppAuth(APP_ID, private_key),
-        installation_id
-    )
-    return Github(auth=auth)
 
 
 def index_repo_history(repo_name: str, installation_id: int):
